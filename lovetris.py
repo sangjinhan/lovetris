@@ -122,12 +122,12 @@ class Well:
                 c = '.'
                 if y < bar:
                     c = ':'
-                if self.get(x, y):
-                    c = '*'
                 if piece_state != None:
                     for cell in piece_state.cells():
                         if x == cell.x and y == cell.y:
                             c = '#'
+                if self.get(x, y):
+                    c = '*'
 
                 print c,
             print
@@ -145,11 +145,14 @@ class Well:
 
         # calculate score
         removed_lines = 0
-        for y1 in range(depth - 1, 0, -1):
-            if self.board[y1] == (1 << width) - 1:
-                removed_lines = removed_lines + 1
-                for y2 in range(y1, 0, -1):
+        y = depth - 1
+        while y >= 1:
+            if self.board[y] == (1 << width) - 1:
+                removed_lines += 1
+                for y2 in range(y, 0, -1):
                     self.board[y2] = self.board[y2 - 1]
+            else:
+                y -= 1
 
         return removed_lines
 
@@ -178,7 +181,7 @@ class Well:
 def decode_replay(replay_encoded):
     ret = ''
     for c in replay_encoded:
-        if c == ' ':
+        if c in [' ', '\n', '\t']: 
             continue
         if (c >= '0' and c <='9') or (c >= 'A' and c <= 'F'):
             ret += moves[int(c, 16) / 4] + moves[int(c, 16) % 4]
@@ -276,17 +279,19 @@ class TaskQueue(object):
 
 def best_height(well, piece, task_queue = None, current_score = 0):
     piece_state = PieceState(piece)
+    trace = ''
 
     # little optimization skipping empty rows
     while piece_state.y + 4 < depth:
         if well.board[piece_state.y + 4] != 0:
             break
         piece_state.y = piece_state.y + 1
+        trace += 'D'
         
     min_height = None
 
     queue = collections.deque()
-    queue.append((piece_state, ''))
+    queue.append((piece_state, trace))
 
     visited = set()
     visited.add((piece_state.x, piece_state.y, piece_state.o))
@@ -329,62 +334,30 @@ def worst_piece(well):
 
     return max_height_piece
         
-# the best solution ever known (30 lines)
-sol30_encoded = 'C02A AAAA AAAB 00AA AAAA AC08 AAAA AAC2 AAAA AAAA C2AA AAAA AEAA AAAA AA56 AAAA AAAA B55A AAAA AA96 AAAA AAAA D5AA AAAA A9AA AAAA AAB5 AAAA AAAA AAAA AAAA DAAA AAAA 9756 AAAA AA8A AAAA AAAB AAAA AAAB 5AAA AAAB 56AA AAAA AAAA A82A AAAA B00A AAAA A6D6 AB55 6AAA AAA9 4AAA AAA6 AAAA AD56 AAAA B56A AAAA 032A AAAA A65B F00A AAAA AA6E EFC0 2AAA AAAA EB00 AAAA AAA8 0AAA AAAA 802A AAAA AA54 AAAA AAA1 AAAA AAA0 AAAA AAA0 0AAA AAAA C02A AAAA B002 AAAA B00A AAAC 2AAA AAB0 AAAA AEAA AAA9 5AAA AAA9 D5AA AAA5 AAAA AAB5 6AAA A6AA AAAB 5AAA AAAA AAAA DAAA AAD5 56AA AA2A AAAA BAAA AAD6 AAAB 56AA AAAA 82AA AC02 AAA7 B5AA D556 AAAA 52AA A6AA B55A AB56 AA80 FCAA AAA5 583F 0AAA A9BB BF00 AAAA AE80 32AA AA82 FAAA A802 AAAA 96AA AA1A AAA8 2AAA A00A AAAB 00AA AB00 AAB0 AAAB 0AAB AAA9 5AAA AD56 AA5A AAB5 6AAC 02A9 AAAB 5AAA AAAD AAB5 5AA2 AAAE AA0A AAB2 AAD5 6AB5 AA02 AAA0 0AAA B55A AD6A BAAC 2AAB 0AA0 C2AA C02A'
-sol30 = decode_replay(sol30_encoded)
-
-def replay_test(task_queue):
+def replay_test(task_queue, seed):
     well = Well()
     piece_state = PieceState(worst_piece(well))
     score = 0
     pieces = 1
 
-    for i, move in enumerate(sol30):
+    for i, move in enumerate(seed):
         ret = handle_move(well, piece_state, move)
-        well.dump(piece_state)
         if ret >= 0:
+            well.dump()
             score += ret
             piece_state = PieceState(worst_piece(well))
             pieces = pieces + 1
             if task_queue is not None:
                 tmp_well = copy.deepcopy(well)
-                tmp_well.append_replay(sol30[:i + 1])
+                tmp_well.append_replay(seed[:i + 1])
                 task_queue.add(tmp_well, score)
-            print '%d/%d: score: %d (%d pieces)' % (i + 1, len(sol30), score, pieces)
+            print '%d/%d: score: %d (%d pieces)' % (i + 1, len(seed), score, pieces)
         elif ret == -1:
             break
 
-# captured when i == 1000 and score == 16
-test_well_str = '''
-: : : : : : : : : :
-: : : : : : : : : :
-: : : : : : : : : :
-: : : : : : : : : :
-. . . . . . . . . .
-. . . . . . . . . .
-. . . . . . . . . .
-. . . . . . . . . .
-. . . * * * * * . *
-. . * * * * * * * *
-. . . . . * * * * *
-. . . . . * * * * *
-. . . . . * * * * *
-* . . * * * * * * *
-. * . * . * . * * .
-. * * * * * * * * *
-. * * . * * * * * *
-. * . * . * * * * *
-. * * * * * * * * *
-. * . * . * . * * .
-'''
-
-build_orientations()
-
-if __name__ == '__main__':
+def solve(hint_encoded = ''):
     task_queue = TaskQueue()
-    #well = Well(test_well_str)
-    #task_queue.add(well, 16)
-    replay_test(task_queue)
+    replay_test(task_queue, decode_replay(hint_encoded))
 
     begin = time.time()
     trials = 0
@@ -395,8 +368,10 @@ if __name__ == '__main__':
         trials = trials + 1
         if score > best_score:
             best_score = score
-            print 'got best score %d!!' % best_score
             replay = well.get_replay()
+
+            print '(timestamp: %.3f, trial: %d) got a new best score %d!!' % \
+                    (time.time() - begin, trials, best_score)
 
             print 'Replay:'
             print replay
@@ -405,13 +380,14 @@ if __name__ == '__main__':
             print encode_replay(replay)
 
             well.dump()
+            if score == 29:
+                break
 
         if trials % 10 == 0:
             print '%dth trial, %d wells left,(%d seen)' % (trials, len(task_queue), task_queue.num_visited()), 
             print 'best score %d' % best_score, 
             print 'current score %d (height = %d)' % (score, height)
 
-        print 'Working my ass off... (trials %d)' % trials
         if trials % 100 == 0:
             well.dump()
 
@@ -420,6 +396,26 @@ if __name__ == '__main__':
 
     end = time.time()
     print 'total time =', end - begin
+
+build_orientations()
+
+if __name__ == '__main__':
+    # prefiex (27 lines) of the best solution ever known (30 lines)
+    sol30_encoded = '''C02A AAAA AAAB 00AA AAAA AC08 AAAA AAC2 AAAA AAAA C2AA AAAA AEAA AAAA AA56
+    AAAA AAAA B55A AAAA AA96 AAAA AAAA D5AA AAAA A9AA AAAA AAB5 AAAA AAAA AAAA
+    AAAA DAAA AAAA 9756 AAAA AA8A AAAA AAAB AAAA AAAB 5AAA AAAB 56AA AAAA AAAA
+    A82A AAAA B00A AAAA A6D6 AB55 6AAA AAA9 4AAA AAA6 AAAA AD56 AAAA B56A AAAA
+    032A AAAA A65B F00A AAAA AA6E EFC0 2AAA AAAA EB00 AAAA AAA8 0AAA AAAA 802A
+    AAAA AA54 AAAA AAA1 AAAA AAA0 AAAA AAA0 0AAA AAAA C02A AAAA B002 AAAA B00A
+    AAAC 2AAA AAB0 AAAA AEAA AAA9 5AAA AAA9 D5AA AAA5 AAAA AAB5 6AAA A6AA AAAB
+    5AAA AAAA AAAA DAAA AAD5 56AA AA2A AAAA BAAA AAD6 AAAB 56AA AAAA 82AA AC02
+    AAA7 B5AA D556 AAAA 52AA A6AA B55A AB56 AA80 FCAA AAA5 583F 0AAA A9BB BF00
+    AAAA AE80 32AA AA82 FAAA A802 AAAA 96AA AA1A AAA8 2AAA A00A AAAB 00AA AB00
+    AAB0 AAAB 0AAB AAA9 5AAA AD56 AA5A AAB5 6AAC 02A9 AAAB 5AAA AAAD AAB5 5AA2
+    AAAE AA0A AAB2 AA'''
+
+    solve(sol30_encoded)
+
 
 # -----------------------------------
 
