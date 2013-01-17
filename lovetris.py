@@ -17,55 +17,50 @@ moves = ['L', 'R', 'D', 'U']
 pieces_inorder = ['S', 'Z', 'O', 'I', 'L', 'J', 'T']
 pieces_info = {
     'S': [
-        { 'x': 1, 'y': 2 },
-        { 'x': 2, 'y': 1 },
-        { 'x': 2, 'y': 2 },
-        { 'x': 3, 'y': 1 }
+        (1, 2),
+        (2, 1),
+        (2, 2),
+        (3, 1)
     ],
     'Z': [
-        { 'x': 1, 'y': 1 },
-        { 'x': 2, 'y': 1 },
-        { 'x': 2, 'y': 2 },
-        { 'x': 3, 'y': 2 }
+        (1, 1),
+        (2, 1),
+        (2, 2),
+        (3, 2)
     ],
     'O': [
-        { 'x': 1, 'y': 1 },
-        { 'x': 1, 'y': 2 },
-        { 'x': 2, 'y': 1 },
-        { 'x': 2, 'y': 2 }
+        (1, 1),
+        (1, 2),
+        (2, 1),
+        (2, 2)
     ],
     'I': [
-        { 'x': 0, 'y': 1 },
-        { 'x': 1, 'y': 1 },
-        { 'x': 2, 'y': 1 },
-        { 'x': 3, 'y': 1 }
+        (0, 1),
+        (1, 1),
+        (2, 1),
+        (3, 1)
     ],
     'L': [
-        { 'x': 1, 'y': 1 },
-        { 'x': 1, 'y': 2 },
-        { 'x': 2, 'y': 1 },
-        { 'x': 3, 'y': 1 }
+        (1, 1),
+        (1, 2),
+        (2, 1),
+        (3, 1)
     ],
     'J': [
-        { 'x': 1, 'y': 1 },
-        { 'x': 1, 'y': 2 },
-        { 'x': 1, 'y': 3 },
-        { 'x': 2, 'y': 1 }
+        (1, 1),
+        (1, 2),
+        (1, 3),
+        (2, 1)
     ],
     'T': [
-        { 'x': 1, 'y': 1 },
-        { 'x': 2, 'y': 1 },
-        { 'x': 2, 'y': 2 },
-        { 'x': 3, 'y': 1 }
+        (1, 1),
+        (2, 1),
+        (2, 2),
+        (3, 1)
     ]
 }
 
 class PieceState:
-    class Cell:
-        def __init__(self, x, y):
-            self.x = x
-            self.y = y
-
     def __init__(self, piece):
         self.piece = piece
         self.x = (width - 4) / 2
@@ -73,13 +68,13 @@ class PieceState:
         self.o = 0
 
     def cells(self):
-        for cell in pieces_info[self.piece + str(self.o)]:
-            yield self.Cell(self.x + cell['x'], self.y + cell['y'])
+        return map(lambda cell: (self.x + cell[0], self.y + cell[1]),
+                pieces_info[self.piece + str(self.o)])
 
 class Well:
     def __init__(self, init_board_str = ''):
         self.board = [0] * depth
-        self.replay = []
+        self.trace = []
         
         x = 0
         y = 0
@@ -98,25 +93,21 @@ class Well:
 
     def __eq__(self, other):
         return self.board.__eq__(other.board) 
-
+    
     def __hash__(self):
         ret = 0
-        for i in range(depth):
-            ret = (ret << width) + ret
+        for line in self.board:
+            ret = (ret << width) | line
         return ret
 
     # returns True if the cell (x, y) in well is occupied
     def get(self, x, y):
-        assert x >= 0 and x < width
-        assert y >= 0 and y < depth
-        return (self.board[y] >> x) % 2 == 1
+        return (self.board[y] >> x) & 1 == 1
 
     def set(self, x, y):
-        assert not self.get(x, y)
         self.board[y] = self.board[y] | (1 << x)
 
     def dump(self, piece_state = None):
-        print
         for y in range(depth):
             for x in range(width):
                 c = '.'
@@ -124,7 +115,7 @@ class Well:
                     c = ':'
                 if piece_state != None:
                     for cell in piece_state.cells():
-                        if x == cell.x and y == cell.y:
+                        if x == cell[0] and y == cell[1]:
                             c = '#'
                 if self.get(x, y):
                     c = '*'
@@ -132,13 +123,15 @@ class Well:
                 print c,
             print
         print '-' * (width * 2 - 1)
+        print
 
     # returns # of removed lines (0 if none, -1 if gameover)
     def add(self, piece_state):
         for cell in piece_state.cells():
-            self.set(cell.x, cell.y)
+            self.set(cell[0], cell[1])
 
         # gameover check
+        # Hatetris checks gameover first, then removes any complete lines.
         for y in range(bar):
             if self.board[y]:
                 return -1
@@ -156,19 +149,19 @@ class Well:
 
         return removed_lines
 
-    def append_replay(self, s):
-        self.replay.append(s)
+    def append_trace(self, s):
+        self.trace.append(s)
 
-    def get_replay(self):
-        return ' '.join(self.replay)
+    def get_trace(self):
+        return ' '.join(self.trace)
 
     def collision(self, piece_state):
         for cell in piece_state.cells():
-            if cell.x < 0 or cell.x >= width:
+            if cell[0] < 0 or cell[0] >= width:
                 return True
-            if cell.y < 0 or cell.y >= depth:
+            if cell[1] < 0 or cell[1] >= depth:
                 return True
-            if self.get(cell.x, cell.y):
+            if self.get(cell[0], cell[1]):
                 return True
         return False
 
@@ -178,21 +171,21 @@ class Well:
                 return depth - y - 1
         return depth
 
-def decode_replay(replay_encoded):
+def decode_trace(trace_encoded):
     ret = ''
-    for c in replay_encoded:
+    for c in trace_encoded:
         if c in [' ', '\n', '\t']: 
             continue
         if (c >= '0' and c <='9') or (c >= 'A' and c <= 'F'):
             ret += moves[int(c, 16) / 4] + moves[int(c, 16) % 4]
         else:
-            sys.stderr.write('invalid character in the replay! (%s)' % c)
+            sys.stderr.write('invalid character in the trace! (%s)' % c)
             assert False
     return ret
 
-def encode_replay(replay):
+def encode_trace(trace):
     tmp = ''
-    for c in replay:
+    for c in trace:
         if c in moves:
             tmp = tmp + c
 
@@ -208,44 +201,59 @@ def encode_replay(replay):
     return ret
 
 def build_orientations():
+    def rotate(piece_info):
+        ret = []
+        for cell in piece_info:
+            new_x = 3 - cell[1]
+            new_y = cell[0]
+            ret.append((new_x, new_y))
+        return ret
+
     for piece in copy.copy(pieces_info):
-        piece_info = copy.deepcopy(pieces_info[piece])
+        piece_info = pieces_info[piece]
+
         pieces_info[piece + '0'] = piece_info
 
-        for o in range(1, 4):
-            new_piece_info = copy.deepcopy(piece_info)
-            for cell_index in range(len(piece_info)):
-                new_piece_info[cell_index]['x'] = 3 - piece_info[cell_index]['y']
-                new_piece_info[cell_index]['y'] = piece_info[cell_index]['x']
-            pieces_info[piece + str(o)] = new_piece_info
-            piece_info = new_piece_info
+        piece_info = rotate(piece_info)
+        pieces_info[piece + '1'] = piece_info
+
+        piece_info = rotate(piece_info)
+        pieces_info[piece + '2'] = piece_info
+        
+        piece_info = rotate(piece_info)
+        pieces_info[piece + '3'] = piece_info
 
 # returns >=  0 if done and returns the new score (well modified)
 #         == -1 if game over (well modified)
 #         == -2 if OK and continue (piece_state modified)
 #         == -3 if invalid move
+# piece_state may be modified.
 def handle_move(well, piece_state, move):
-    assert move in moves
-
     if move == 'L':
-        piece_state.x = piece_state.x - 1
+        piece_state.x -= 1
         if well.collision(piece_state):
             piece_state.x = piece_state.x + 1       # rollback
             return -3
         return -2
     elif move == 'R':
-        piece_state.x = piece_state.x + 1
+        piece_state.x += 1
         if well.collision(piece_state):
             piece_state.x = piece_state.x - 1       # rollback
             return -3
         return -2
     elif move == 'D':
-        piece_state.y = piece_state.y + 1
+        piece_state.y += + 1
         if well.collision(piece_state):
+            # placed
             piece_state.y = piece_state.y - 1       # rollback
             return well.add(piece_state)            # return score or -1 if gameover
         return -2
     elif move == 'U':
+        # Do not allow rotation for 'O'. 
+        # 'S', 'Z', 'I' pieces have some corner cases for this optimization.
+        if piece_state.piece == 'O':
+            return -2
+
         piece_state.o = (piece_state.o + 1) % 4
         if well.collision(piece_state):
             piece_state.o = (piece_state.o - 1) % 4 # rollback
@@ -296,29 +304,31 @@ def best_height(well, piece, task_queue = None, current_score = 0):
     visited = set()
     visited.add((piece_state.x, piece_state.y, piece_state.o))
 
-    tmp_well = copy.deepcopy(well)
+    original_well = well
+    well = copy.deepcopy(well)
+
     while len(queue) > 0:
-        piece_state, replay_so_far = queue.popleft()
+        original_piece_state, trace_so_far = queue.popleft()
         
         for move in moves:
-            tmp_piece_state = copy.copy(piece_state)
-            ret = handle_move(tmp_well, tmp_piece_state, move)
+            piece_state = copy.copy(original_piece_state)
+            ret = handle_move(well, piece_state, move)
 
             if ret == -3:   # invalid move
                 continue
             elif ret == -2: # continue
-                if (tmp_piece_state.x, tmp_piece_state.y, tmp_piece_state.o) not in visited:
-                    queue.append((tmp_piece_state, replay_so_far + move))
-                    visited.add((tmp_piece_state.x, tmp_piece_state.y, tmp_piece_state.o))
+                if (piece_state.x, piece_state.y, piece_state.o) not in visited:
+                    queue.append((piece_state, trace_so_far + move))
+                    visited.add((piece_state.x, piece_state.y, piece_state.o))
             else:           # placed and/or gameover
-                height = tmp_well.height()
+                height = well.height()
                 if min_height == None or min_height > height:
                     min_height = height
                 if ret >= 0:
                     if task_queue is not None:
-                        tmp_well.append_replay(replay_so_far + move)
-                        task_queue.add(tmp_well, current_score + ret)
-                tmp_well = copy.deepcopy(well)
+                        well.append_trace(trace_so_far + move)
+                        task_queue.add(well, current_score + ret)
+                well = copy.deepcopy(original_well)
 
     return min_height
                     
@@ -334,13 +344,17 @@ def worst_piece(well):
 
     return max_height_piece
         
-def replay_test(task_queue, seed):
+def replay_trace(trace = '', task_queue = None):
     well = Well()
+
+    if task_queue is not None:
+        task_queue.add(well, 0)     # add an empty well
+
     piece_state = PieceState(worst_piece(well))
     score = 0
     pieces = 1
 
-    for i, move in enumerate(seed):
+    for i, move in enumerate(trace):
         ret = handle_move(well, piece_state, move)
         if ret >= 0:
             well.dump()
@@ -349,47 +363,48 @@ def replay_test(task_queue, seed):
             pieces = pieces + 1
             if task_queue is not None:
                 tmp_well = copy.deepcopy(well)
-                tmp_well.append_replay(seed[:i + 1])
+                tmp_well.append_trace(trace[:i + 1])
                 task_queue.add(tmp_well, score)
-            print '%d/%d: score: %d (%d pieces)' % (i + 1, len(seed), score, pieces)
+            print '%d/%d: score: %d (%d pieces)' % (i + 1, len(trace), score, pieces)
         elif ret == -1:
             break
 
 def solve(hint_encoded = ''):
     task_queue = TaskQueue()
-    replay_test(task_queue, decode_replay(hint_encoded))
+    replay_trace(decode_trace(hint_encoded), task_queue)
 
     begin = time.time()
     trials = 0
     best_score = 0
+    ties = 0
 
     while len(task_queue) > 0:
         score, height, well = task_queue.get()
         trials = trials + 1
         if score > best_score:
             best_score = score
-            replay = well.get_replay()
+            ties = 0
 
-            print '(timestamp: %.3f, trial: %d) got a new best score %d!!' % \
+            print '(timestamp: %.2f, trial: %d) got a new best score %d!!' % \
                     (time.time() - begin, trials, best_score)
 
-            print 'Replay:'
-            print replay
+            trace = well.get_trace()
+            print 'Trace:'
+            print trace
 
-            print 'Encoded replay:'
-            print encode_replay(replay)
+            print 'Encoded trace:'
+            print encode_trace(trace)
 
+            print 'Dump:'
             well.dump()
-            if score == 29:
-                break
+
+        elif score == best_score:
+            ties += 1
 
         if trials % 10 == 0:
-            print '%dth trial, %d wells left,(%d seen)' % (trials, len(task_queue), task_queue.num_visited()), 
-            print 'best score %d' % best_score, 
+            print '%dth trial, %d wells left, %d seen,' % (trials, len(task_queue), task_queue.num_visited()), 
+            print 'best score %d (%d ties)' % (best_score, ties),
             print 'current score %d (height = %d)' % (score, height)
-
-        if trials % 100 == 0:
-            well.dump()
 
         next_piece = worst_piece(well)
         best_height(well, next_piece, task_queue, score)
@@ -415,8 +430,3 @@ if __name__ == '__main__':
     AAAE AA0A AAB2 AA'''
 
     solve(sol30_encoded)
-
-
-# -----------------------------------
-
-# vi: sts=4 et nocindent
