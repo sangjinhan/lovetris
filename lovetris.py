@@ -183,6 +183,16 @@ class Well:
                 return depth - y - 1
         return depth
 
+    popcount_table = [bin(num)[2:].count('1') for num in range(0, 2**width)]
+
+    # returns the total number of cells in the well
+    # Using this for the priority queue was a BAD idea....
+    def num_cells(self):
+        count = 0
+        for line in self.board[bar:]:
+            count += Well.popcount_table[line]
+        return count
+
 def decode_trace(trace_encoded):
     ret = ''
     for c in trace_encoded:
