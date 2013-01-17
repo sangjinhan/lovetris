@@ -72,16 +72,17 @@ class PieceState:
                 pieces_info[self.piece + str(self.o)])
 
 class Well:
-    def __init__(self, init_board_str = ''):
+    def __init__(self, init_board_str = '', trace = '', parent = None):
         self.board = [0] * depth
-        self.trace = []
-        
+        self.trace = trace
+        self.parent = parent
+
         x = 0
         y = 0
         for c in init_board_str:
             if c in ':.#*':
                 if c == '*':
-                    self.set(x, y)
+                    self._set(x, y)
                 
                 x = x + 1
                 if x == width:
@@ -104,7 +105,8 @@ class Well:
     def get(self, x, y):
         return (self.board[y] >> x) & 1 == 1
 
-    def set(self, x, y):
+    # well is supposed to be immutable...
+    def _set(self, x, y):
         self.board[y] = self.board[y] | (1 << x)
 
     def dump(self, piece_state = None):
@@ -125,35 +127,45 @@ class Well:
         print '-' * (width * 2 - 1)
         print
 
-    # returns # of removed lines (0 if none, -1 if gameover)
-    def add(self, piece_state):
-        for cell in piece_state.cells():
-            self.set(cell[0], cell[1])
-
+    # returns the number of removed lines (0 if none, -1 if gameover)
+    # and a child well (None if gameover)
+    def add(self, piece_state, move_piece):
         # gameover check
         # Hatetris checks gameover first, then removes any complete lines.
-        for y in range(bar):
-            if self.board[y]:
-                return -1
+        for cell in piece_state.cells():
+            if cell[1] < bar:
+                return -1, None
+
+        child = Well(trace = move_piece, parent = self)
+        child.board = copy.copy(self.board)
+
+        for cell in piece_state.cells():
+            child._set(cell[0], cell[1])
 
         # calculate score
         removed_lines = 0
         y = depth - 1
         while y >= 1:
-            if self.board[y] == (1 << width) - 1:
+            if child.board[y] == (1 << width) - 1:
                 removed_lines += 1
                 for y2 in range(y, 0, -1):
-                    self.board[y2] = self.board[y2 - 1]
+                    child.board[y2] = child.board[y2 - 1]
             else:
                 y -= 1
 
-        return removed_lines
-
-    def append_trace(self, s):
-        self.trace.append(s)
+        return removed_lines, child
 
     def get_trace(self):
-        return ' '.join(self.trace)
+        lineage = []
+        p = self
+
+        while p != None:
+            if p.trace:
+                lineage.append(p.trace)
+            p = p.parent
+
+        lineage.reverse()
+        return ' '.join(lineage)
 
     def collision(self, piece_state):
         for cell in piece_state.cells():
@@ -223,8 +235,7 @@ def build_orientations():
         piece_info = rotate(piece_info)
         pieces_info[piece + '3'] = piece_info
 
-# returns >=  0 if done and returns the new score (well modified)
-#         == -1 if game over (well modified)
+# returns ==  0 if placed
 #         == -2 if OK and continue (piece_state modified)
 #         == -3 if invalid move
 # piece_state may be modified.
@@ -246,7 +257,7 @@ def handle_move(well, piece_state, move):
         if well.collision(piece_state):
             # placed
             piece_state.y = piece_state.y - 1       # rollback
-            return well.add(piece_state)            # return score or -1 if gameover
+            return 0
         return -2
     elif move == 'U':
         # Do not allow rotation for 'O'. 
@@ -304,31 +315,31 @@ def best_height(well, piece, task_queue = None, current_score = 0):
     visited = set()
     visited.add((piece_state.x, piece_state.y, piece_state.o))
 
-    original_well = well
-    well = copy.deepcopy(well)
-
     while len(queue) > 0:
         original_piece_state, trace_so_far = queue.popleft()
         
-        for move in moves:
+        for move_single in moves:
             piece_state = copy.copy(original_piece_state)
-            ret = handle_move(well, piece_state, move)
+            ret = handle_move(well, piece_state, move_single)
 
             if ret == -3:   # invalid move
                 continue
             elif ret == -2: # continue
                 if (piece_state.x, piece_state.y, piece_state.o) not in visited:
-                    queue.append((piece_state, trace_so_far + move))
+                    queue.append((piece_state, trace_so_far + move_single))
                     visited.add((piece_state.x, piece_state.y, piece_state.o))
             else:           # placed and/or gameover
-                height = well.height()
+                lines, child = well.add(piece_state, trace_so_far + move_single)
+
+                if lines >= 0:
+                    height = child.height()
+                    if task_queue is not None:
+                        task_queue.add(child, current_score + lines)
+                else:
+                    height = 9999       # gameover
+
                 if min_height == None or min_height > height:
                     min_height = height
-                if ret >= 0:
-                    if task_queue is not None:
-                        well.append_trace(trace_so_far + move)
-                        task_queue.add(well, current_score + ret)
-                well = copy.deepcopy(original_well)
 
     return min_height
                     
@@ -353,21 +364,29 @@ def replay_trace(trace = '', task_queue = None):
     piece_state = PieceState(worst_piece(well))
     score = 0
     pieces = 1
+    move_piece = ''
 
     for i, move in enumerate(trace):
         ret = handle_move(well, piece_state, move)
-        if ret >= 0:
-            well.dump()
-            score += ret
-            piece_state = PieceState(worst_piece(well))
+        move_piece += move
+
+        if ret == 0:
+            lines, child = well.add(piece_state, move_piece)
+            if lines == -1:
+                break
+
+            score += lines
             pieces = pieces + 1
-            if task_queue is not None:
-                tmp_well = copy.deepcopy(well)
-                tmp_well.append_trace(trace[:i + 1])
-                task_queue.add(tmp_well, score)
             print '%d/%d: score: %d (%d pieces)' % (i + 1, len(trace), score, pieces)
-        elif ret == -1:
-            break
+
+            well = child
+            well.dump()
+
+            piece_state = PieceState(worst_piece(well))
+            move_piece = ''
+
+            if task_queue is not None:
+                task_queue.add(well, score)
 
 def solve(hint_encoded = ''):
     task_queue = TaskQueue()
@@ -398,6 +417,9 @@ def solve(hint_encoded = ''):
             print 'Dump:'
             well.dump()
 
+            if best_score == 30:
+                break
+
         elif score == best_score:
             ties += 1
 
@@ -415,8 +437,8 @@ def solve(hint_encoded = ''):
 build_orientations()
 
 if __name__ == '__main__':
-    # prefiex (27 lines) of the best solution ever known (30 lines)
-    sol30_encoded = '''C02A AAAA AAAB 00AA AAAA AC08 AAAA AAC2 AAAA AAAA C2AA AAAA AEAA AAAA AA56
+    # prefiex (27 lines) of the best solution
+    sol27_encoded = '''C02A AAAA AAAB 00AA AAAA AC08 AAAA AAC2 AAAA AAAA C2AA AAAA AEAA AAAA AA56
     AAAA AAAA B55A AAAA AA96 AAAA AAAA D5AA AAAA A9AA AAAA AAB5 AAAA AAAA AAAA
     AAAA DAAA AAAA 9756 AAAA AA8A AAAA AAAB AAAA AAAB 5AAA AAAB 56AA AAAA AAAA
     A82A AAAA B00A AAAA A6D6 AB55 6AAA AAA9 4AAA AAA6 AAAA AD56 AAAA B56A AAAA
@@ -429,4 +451,27 @@ if __name__ == '__main__':
     AAB0 AAAB 0AAB AAA9 5AAA AD56 AA5A AAB5 6AAC 02A9 AAAB 5AAA AAAD AAB5 5AA2
     AAAE AA0A AAB2 AA'''
 
-    solve(sol30_encoded)
+    sol26_encoded = '''C02A AAAA AAAB 00AA AAAA AC08 AAAA AAC2 AAAA AAAA C2AA AAAA AEAA AAAA AA56 AAAA
+    AAAA B55A AAAA AA96 AAAA AAAA D5AA AAAA A9AA AAAA AAB5 AAAA AAAA AAAA AAAA DAAA
+    AAAA 9756 AAAA AA8A AAAA AAAB AAAA AAAB 5AAA AAAB 56AA AAAA AAAA A82A AAAA B00A
+    AAAA A6D6 AB55 6AAA AAA9 4AAA AAA6 AAAA AD56 AAAA B56A AAAA 032A AAAA A65B F00A
+    AAAA AA6E EFC0 2AAA AAAA EB00 AAAA AAA8 0AAA AAAA 802A AAAA AA54 AAAA AAA1 AAAA
+    AAA0 AAAA AAA0 0AAA AAAA C02A AAAA B002 AAAA B00A AAAC 2AAA AAB0 AAAA AEAA AAA9
+    5AAA AAA9 D5AA AAA5 AAAA AAB5 6AAA A6AA AAAB 5AAA AAAA AAAA DAAA AAD5 56AA AA2A
+    AAAA BAAA AAD6 AAAB 56AA AAAA 82AA AC02 AAA7 B5AA D556 AAAA 52AA A6AA B55A AB56
+    AA80 FCAA AAA5 583F 0AAA A9BB BF00 AAAA AE80 32AA AA82 FAAA A802 AAAA 96AA AA1A
+    AAA8 2AAA A00A AAAB 00AA AB00 AAB0 AAAB 0AAB AAA9 5AAA AD56 AA5A AAB5 6AAC 02A9
+    AAAB 5AAA AAAD AAB5 5AA2 AAAE AA'''
+
+    sol21_encoded = '''C02A AAAA AAAB 00AA AAAA AC08 AAAA AAC2 AAAA AAAA C2AA AAAA AEAA AAAA AA56 AAAA
+    AAAA B55A AAAA AA96 AAAA AAAA D5AA AAAA A9AA AAAA AAB5 AAAA AAAA AAAA AAAA DAAA
+    AAAA 9756 AAAA AA8A AAAA AAAB AAAA AAAB 5AAA AAAB 56AA AAAA AAAA A82A AAAA B00A
+    AAAA A6D6 AB55 6AAA AAA9 4AAA AAA6 AAAA AD56 AAAA B56A AAAA 032A AAAA A65B F00A
+    AAAA AA6E EFC0 2AAA AAAA EB00 AAAA AAA8 0AAA AAAA 802A AAAA AA54 AAAA AAA1 AAAA
+    AAA0 AAAA AAA0 0AAA AAAA C02A AAAA B002 AAAA B00A AAAC 2AAA AAB0 AAAA AEAA AAA9
+    5AAA AAA9 D5AA AAA5 AAAA AAB5 6AAA A6AA AAAB 5AAA AAAA AAAA DAAA AAD5 56AA AA2A
+    AAAA BAAA AAD6 AAAB 56AA AAAA 82AA AC02 AAA7 B5AA D556 AAAA 52AA A6AA B55A AB56
+    AA80 FCAA AAA5 583F 0AAA A9BB BF00 AAAA AE80 32AA AA82 FAAA A802 AAAA 96AA AA1A
+    AAA8 2AAA A'''
+
+    solve(sol26_encoded)
