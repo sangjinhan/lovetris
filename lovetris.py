@@ -6,6 +6,7 @@ import collections
 import time
 import heapq
 import random
+import multiprocessing
 
 bar = 4
 width = 10
@@ -306,7 +307,7 @@ class TaskQueue(object):
     def num_visited(self):
         return len(self.dict)
 
-def best_height(well, piece, task_queue = None, current_score = 0):
+def best_height(well, piece, children = None):
     piece_state = PieceState(piece)
     trace = ''
 
@@ -343,8 +344,8 @@ def best_height(well, piece, task_queue = None, current_score = 0):
 
                 if lines >= 0:
                     height = child.height()
-                    if task_queue is not None:
-                        task_queue.add(child, current_score + lines)
+                    if children is not None:
+                        children.append((child, lines))
                 else:
                     height = 9999       # gameover
 
@@ -398,14 +399,27 @@ def replay_trace(trace = '', task_queue = None):
             if task_queue is not None:
                 task_queue.add(well, score)
 
-def solve(hint_encoded = ''):
+def solve(hint_encoded = '', num_parallel_workers = 0):
+    def worker(well):
+        next_piece = worst_piece(well)
+        children = []
+        best_height(well, next_piece, children)
+        for child, lines in children:
+            child.parent = None
+        return children
+
     task_queue = TaskQueue()
     replay_trace(decode_trace(hint_encoded), task_queue)
 
-    begin = time.time()
     trials = 0
     best_score = 0
     ties = 0
+
+    begin = time.time()
+
+    if num_parallel_workers > 0:
+        pool = multiprocessing.Pool(processes = num_parallel_workers)
+        pending_results = []
 
     while len(task_queue) > 0:
         score, height, well = task_queue.get()
@@ -427,19 +441,37 @@ def solve(hint_encoded = ''):
             print 'Dump:'
             well.dump()
 
-            if best_score == 30:
+            if best_score == 31:
                 break
 
         elif score == best_score:
             ties += 1
 
-        if trials % 10 == 0:
+        if trials % 100 == 0:
             print '%dth trial, %d wells left, %d seen,' % (trials, len(task_queue), task_queue.num_visited()), 
             print 'best score %d (%d ties)' % (best_score, ties),
             print 'current score %d (height = %d)' % (score, height)
 
-        next_piece = worst_piece(well)
-        best_height(well, next_piece, task_queue, score)
+        if num_parallel_workers > 0:
+            pending_results.append((well, score, pool.apply_async(worker, args=(well,))))
+
+            while len(pending_results) > 0 and \
+                    (len(pending_results) >= num_parallel_workers * 2 or \
+                     len(task_queue) == 0):
+                well, score, async_result = pending_results.pop(0)
+
+                children = async_result.get()                
+                for child, lines in children:
+                    child.parent = well
+                    task_queue.add(child, score + lines)
+        else:
+            # sequential
+            next_piece = worst_piece(well)
+            children = []
+            best_height(well, next_piece, children)
+
+            for child, lines in children:
+                task_queue.add(child, score + lines)
 
     end = time.time()
     print 'total time =', end - begin
@@ -484,4 +516,4 @@ if __name__ == '__main__':
     AA80 FCAA AAA5 583F 0AAA A9BB BF00 AAAA AE80 32AA AA82 FAAA A802 AAAA 96AA AA1A
     AAA8 2AAA A'''
 
-    solve(sol26_encoded)
+    solve(sol26_encoded, num_parallel_workers = 7)
